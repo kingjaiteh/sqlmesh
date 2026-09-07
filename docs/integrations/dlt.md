@@ -68,6 +68,8 @@ sqlmesh dlt_refresh <pipeline-name> --dlt-path <pipelines-working-directory>
 
 SQLMesh will retrieve the data warehouse connection credentials from your dlt project to configure the `config.yaml` file. This configuration can be modified or customized as needed. For more details, refer to the [configuration guide](../guides/configuration.md).
 
+For a dlt `ducklake` destination, SQLMesh generates a `duckdb` connection with the lake attached as a `ducklake` catalog, mirroring how dlt attaches it. Run `sqlmesh init` from the same directory as the pipeline so that dlt resolves the same catalog and storage paths. See the [DuckDB engine documentation](./engines/duckdb.md) for the available DuckLake catalog options.
+
 ### Example
 
 Generating a SQLMesh project dlt is quite simple. In this example, we'll use the example `sushi_pipeline.py` from the [sushi-dlt project](https://github.com/SQLMesh/sqlmesh/tree/main/examples/sushi_dlt).

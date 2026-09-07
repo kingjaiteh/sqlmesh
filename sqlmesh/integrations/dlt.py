@@ -62,6 +62,9 @@ def generate_dlt_models_and_settings(
     db_type = pipeline.destination.to_name(pipeline.destination)
     if db_type == "filesystem":
         connection_config = None
+    elif db_type == "ducklake":
+        # A DuckLake destination is a DuckDB connection with the lake attached as a catalog
+        connection_config = format_ducklake_config(pipeline.destination_client().config.credentials)
     else:
         client = pipeline.destination_client()
         config = client.config
@@ -233,6 +236,60 @@ def format_config(configs: t.Dict[str, str], db_type: str) -> str:
 
     return "\n".join(
         [f"      {key}: {value}" for key, value in config.items() if key not in invalid_fields]
+    )
+
+
+def format_ducklake_config(credentials: t.Any) -> str:
+    """Generate a string for the gateway connection config of a dlt DuckLake destination.
+
+    The lake is attached to a DuckDB connection as a `ducklake` catalog. The attach path
+    mirrors how dlt itself attaches the lake for each supported catalog database.
+    """
+    catalog = credentials.catalog
+    drivername = getattr(catalog, "drivername", None) or ""
+    metadata_schema: t.Optional[str] = None
+
+    if drivername in ("postgres", "postgresql", "mysql"):
+        # DuckDB only knows `postgres`, not sqlalchemy's `postgresql`
+        drivername = "postgres" if drivername == "postgresql" else drivername
+        db_url = catalog.to_url().render_as_string(hide_password=False)
+        path = f"{drivername}:{db_url}"
+        metadata_schema = credentials.metadata_schema or credentials.ducklake_name
+    elif drivername == "md":
+        path = f"md:{catalog.database}"
+        metadata_schema = credentials.metadata_schema or credentials.ducklake_name
+    elif drivername == "sqlite":
+        path = f"sqlite:{catalog.database}"
+    elif drivername == "duckdb":
+        path = catalog.database
+    else:
+        raise click.ClickException(
+            f"Unsupported DuckLake catalog database '{drivername}' for pipeline destination."
+        )
+
+    attach_options: t.Dict[str, t.Any] = {
+        "type": "ducklake",
+        "path": path,
+        "data_path": credentials.storage_url,
+    }
+    if metadata_schema:
+        attach_options["metadata_schema"] = metadata_schema
+
+    # Validate the connection config
+    parse_connection_config(
+        {"type": "duckdb", "catalogs": {credentials.ducklake_name: attach_options}}
+    )
+
+    def _quote(value: t.Any) -> str:
+        return "'" + str(value).replace("'", "''") + "'"
+
+    return "\n".join(
+        [
+            "      type: duckdb",
+            "      catalogs:",
+            f"        {credentials.ducklake_name}:",
+            *[f"          {key}: {_quote(value)}" for key, value in attach_options.items()],
+        ]
     )
 
 

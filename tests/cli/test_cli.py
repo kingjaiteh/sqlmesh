@@ -1143,6 +1143,55 @@ WHERE
         rmtree(storage_path)
 
 
+def test_dlt_ducklake_pipeline(tmp_path, monkeypatch):
+    import dlt
+
+    # dlt resolves the default DuckLake catalog (sqlite) and storage relative to the cwd
+    monkeypatch.chdir(tmp_path)
+    pipelines_dir = tmp_path / "pipelines"
+
+    ducklake_pipeline = dlt.pipeline(
+        pipeline_name="ducklake_pipeline",
+        destination="ducklake",
+        dataset_name="equipment_dataset",
+        pipelines_dir=str(pipelines_dir),
+    )
+    info = ducklake_pipeline.run([{"item_id": 1}], table_name="equipment")
+    assert not info.has_failed_jobs
+
+    credentials = ducklake_pipeline.destination_client().config.credentials
+
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+    init_example_project(
+        project_path,
+        "duckdb",
+        template=ProjectTemplate.DLT,
+        pipeline="ducklake_pipeline",
+        dlt_path=str(pipelines_dir),
+    )
+
+    # The lake is attached to a DuckDB connection as a ducklake catalog
+    config = (project_path / "config.yaml").read_text()
+    assert (
+        "    connection:\n"
+        "      type: duckdb\n"
+        "      catalogs:\n"
+        "        ducklake:\n"
+        "          type: 'ducklake'\n"
+        f"          path: 'sqlite:{credentials.catalog.database}'\n"
+        f"          data_path: '{credentials.storage_url}'\n"
+    ) in config
+    assert (project_path / "models/incremental_equipment.sql").exists()
+    assert (project_path / "models/incremental__dlt_loads.sql").exists()
+
+    # The generated gateway can read the data loaded by the pipeline
+    context = Context(paths=project_path)
+    assert context.engine_adapter.fetchone(
+        "SELECT item_id FROM ducklake.equipment_dataset.equipment"
+    ) == (1,)
+
+
 def test_dlt_pipeline(runner, tmp_path):
     from dlt.common.pipeline import get_dlt_pipelines_dir
 
